@@ -1,5 +1,7 @@
 require 'active_support/core_ext/time'
 require 'action_dispatch'
+require 'uri'
+require 'net/http'
 require 'pp'
 
 module ExceptionNotifier
@@ -22,8 +24,20 @@ module ExceptionNotifier
         end
 
         Rails.logger.silence do
-          filename = "#{@options[:app_name]}-#{Time.now}.json"
-          File.write("#{Rails.root.to_s}/public/#{filename}", JSON.dump(@data))
+          filename = "#{@options[:app_name] || "errors" }-#{Time.now}.json"
+          if @options[:url].present? && @options[:app_name].present?
+            body = {project: {name: @options[:app_name], title: title , info: @data}}
+            uri = URI.parse(@options[:url])
+            http = Net::HTTP.new(uri.host, uri.port)
+            request = Net::HTTP::Post.new(uri.request_uri)
+            request['Content-Type'] = 'application/json'
+            request.body = body.to_json
+            response = http.request(request)
+          elsif @options[:path].present?
+            File.write("#{@options[:path]}/#{filename}", JSON.dump(@data))
+          else
+            File.write("#{Rails.root.to_s}/public/#{filename}", JSON.dump(@data))
+          end
         end
       end
     end
