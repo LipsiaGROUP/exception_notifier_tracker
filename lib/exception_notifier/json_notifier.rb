@@ -5,6 +5,9 @@ require 'net/http'
 require 'pp'
 
 module ExceptionNotifier
+   class MissingController
+        def method_missing(*args, &block); end
+      end
   class JsonNotifier < ExceptionNotifier::BaseNotifier
     def initialize(opts)
       super
@@ -12,14 +15,29 @@ module ExceptionNotifier
     end
 
     def call(exception, opts = {})
-      title = exception.message || "None"
+      env         = opts[:env]
+      kontroller  = env['action_controller.instance']
+      backtrace   = exception.backtrace.select{|x| !x.include?("lib/ruby/gems") && !x.include?("benchmark.rb")}
+      line_error  = backtrace.first.split("/").last.gsub(Rails.root.to_s, "") rescue ""
+
+      title = [line_error]
+      title << "(#{exception.class})"
+      title << exception.message.to_s
+      title = title.join(" ")
+
+      receiver = exception.receiver rescue nil
+      if receiver.present?
+        receiver_class = receiver.class.to_s
+        title = title.gsub(receiver.inspect, receiver_class)
+      end
+      title = title.length > 120 ? title[0...120] + '...' : title
+
       @data = {title: title}
       ActiveSupport::Notifications.instrument("track.exception_track", title: title) do
-        get_for_env(opts[:env])
+        get_for_env(env)
         @data[:errors] = exception.inspect
         if  exception.backtrace.present?
           @data[:backtrace] = exception.backtrace
-          backtrace = exception.backtrace.select{|x| !x.include?("lib/ruby/gems")}
           @data[:backtrace] = backtrace if backtrace.present?
         end
 
@@ -33,10 +51,6 @@ module ExceptionNotifier
             request['Content-Type'] = 'application/json'
             request.body = body.to_json
             response = http.request(request)
-          elsif @options[:path].present?
-            File.write("#{@options[:path]}/#{filename}", JSON.dump(@data))
-          else
-            File.write("#{Rails.root.to_s}/public/#{filename}", JSON.dump(@data))
           end
         end
       end
